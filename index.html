@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Chat Room</title>
+</head>
+<body>
+  <h2>Chat Room</h2>
+
+  <div id="messages" style="border:1px solid #ccc; height:300px; overflow-y:scroll; margin-bottom:10px;"></div>
+
+  <input type="text" id="messageInput" placeholder="Type a message" />
+  <button onclick="sendMessage()">Send</button>
+
+  <script>
+    // === Prompt for Token and Room ID ===
+    const token = prompt("Enter your access token:");
+    const room_id = prompt("Enter Room ID:");
+    const ws_url = `ws://localhost:8000/ws/${room_id}?token=${token}`;
+    
+    const socket = new WebSocket(ws_url);
+
+    const messagesDiv = document.getElementById("messages");
+    const messageInput = document.getElementById("messageInput");
+
+    // Display messages
+    socket.onmessage = function(event) {
+      const message = event.data;
+      const p = document.createElement("p");
+      p.textContent = message;
+      messagesDiv.appendChild(p);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    };
+
+    // Send message
+    function sendMessage() {
+      const message = messageInput.value;
+      if (message) {
+        socket.send(message);
+        messageInput.value = "";
+      }
+    }
+
+    socket.onopen = function() {
+      const p = document.createElement("p");
+      p.textContent = "[Connected]";
+      p.style.color = "green";
+      messagesDiv.appendChild(p);
+    };
+
+    socket.onclose = function() {
+      const p = document.createElement("p");
+      p.textContent = "[Disconnected]";
+      p.style.color = "red";
+      messagesDiv.appendChild(p);
+    };
+
+    socket.onerror = function(err) {
+      console.error("WebSocket error:", err);
+    };
+  </script>
+</body>
+</html>
