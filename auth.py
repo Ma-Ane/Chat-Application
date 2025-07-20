@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 
 # required constants
-SECRET_KEY = "super-secret-key"  # Use environment variables in production
+SECRET_KEY = "Tgb37Bvds"  
 ALGORITHM = "HS256"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

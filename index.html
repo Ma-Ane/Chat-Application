@@ -6,13 +6,15 @@
 <body>
   <h2>Chat Room</h2>
 
-  <div id="messages" style="border:1px solid #ccc; height:300px; overflow-y:scroll; margin-bottom:10px;"></div>
+  <div id="messages" style="border:1px solid #ccc; height:300px; overflow-y:scroll; margin-bottom:10px;">
+    
+  </div>
 
   <input type="text" id="messageInput" placeholder="Type a message" />
   <button onclick="sendMessage()">Send</button>
 
   <script>
-    // === Prompt for Token and Room ID ===
+    // Prompt for Token and Room ID 
     const token = prompt("Enter your access token:");
     const room_id = prompt("Enter Room ID:");
     const ws_url = `ws://localhost:8000/ws/${room_id}?token=${token}`;
