@@ -1,64 +1,73 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Chat Room</title>
+  <title>FastAPI Chat</title>
 </head>
 <body>
-  <h2>Chat Room</h2>
+  <h1>FastAPI WebSocket Chat</h1>
 
-  <div id="messages" style="border:1px solid #ccc; height:300px; overflow-y:scroll; margin-bottom:10px;">
-    
-  </div>
+  <label>Token:</label>
+  <input type="text" id="tokenInput"><br>
 
-  <input type="text" id="messageInput" placeholder="Type a message" />
+  <label>Room ID:</label>
+  <input type="text" id="roomIdInput"><br>
+
+  <button onclick="connectWebSocket()">Connect</button>
+
+  <div id="chatBox" style="margin-top: 20px; border: 1px solid black; height: 300px; overflow-y: scroll;"></div>
+
+  <input type="text" id="messageInput" placeholder="Type your message...">
   <button onclick="sendMessage()">Send</button>
 
   <script>
-    // Prompt for Token and Room ID 
-    const token = prompt("Enter your access token:");
-    const room_id = prompt("Enter Room ID:");
-    const ws_url = `ws://localhost:8000/ws/${room_id}?token=${token}`;
-    
-    const socket = new WebSocket(ws_url);
+    let socket = null;
 
-    const messagesDiv = document.getElementById("messages");
-    const messageInput = document.getElementById("messageInput");
+    function connectWebSocket() {
+      const token = document.getElementById("tokenInput").value;
+      const roomId = document.getElementById("roomIdInput").value;
 
-    // Display messages
-    socket.onmessage = function(event) {
-      const message = event.data;
-      const p = document.createElement("p");
-      p.textContent = message;
-      messagesDiv.appendChild(p);
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
-    };
+      if (!token || !roomId) {
+        alert("Token and Room ID are required.");
+        return;
+      }
 
-    // Send message
+      socket = new WebSocket(`ws://127.0.0.1:8000/ws/${roomId}?token=${token}`);
+
+      socket.onopen = function () {
+        addMessage("Connected to chat room " + roomId);
+      };
+
+      socket.onmessage = function (event) {
+        const data = JSON.parse(event.data);
+        if (data.error) {
+          addMessage("Error: " + data.error);
+        } else {
+          const time = new Date(data.timestamp).toLocaleTimeString();
+          addMessage(`👤 ${data.sender} [${time}]: ${data.content}`);
+        }
+      };
+
+      socket.onclose = function () {
+        addMessage("Disconnected.");
+      };
+    }
+
     function sendMessage() {
-      const message = messageInput.value;
-      if (message) {
-        socket.send(message);
-        messageInput.value = "";
+      const input = document.getElementById("messageInput");
+      const content = input.value;
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ content }));
+        input.value = "";
       }
     }
 
-    socket.onopen = function() {
-      const p = document.createElement("p");
-      p.textContent = "[Connected]";
-      p.style.color = "green";
-      messagesDiv.appendChild(p);
-    };
-
-    socket.onclose = function() {
-      const p = document.createElement("p");
-      p.textContent = "[Disconnected]";
-      p.style.color = "red";
-      messagesDiv.appendChild(p);
-    };
-
-    socket.onerror = function(err) {
-      console.error("WebSocket error:", err);
-    };
+    function addMessage(text) {
+      const chatBox = document.getElementById("chatBox");
+      const div = document.createElement("div");
+      div.textContent = text;
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
   </script>
 </body>
 </html>

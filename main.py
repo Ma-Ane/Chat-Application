@@ -10,10 +10,17 @@ from authenticate.dependencies import get_current_user, get_admin_user
 from jose import jwt, JWTError
 from datetime import datetime
 import json
+from routes import rooms  # Import the new router
+
 
 # make an instance of fast api
 app = FastAPI()
-app.include_router(protected.router)
+
+# Include user router
+app.include_router(protected.router, prefix="/protected", tags=["Users"])
+
+# Include room router
+app.include_router(rooms.router, prefix="/rooms", tags=["Rooms"])
 
 # Create the tables when app starts
 models.Base.metadata.create_all(bind=engine)
@@ -95,95 +102,134 @@ def create_test_room():
 # websocket with room id
 @app.websocket("/ws/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: int, db: Session = Depends(get_db)):
+    print("WebSocket connection attempt:", room_id)
     token = websocket.query_params.get("token")
     if not token:
-        await websocket.close(code=1008)  # Policy Violation
-        return   
-
-    try:
-        username = await verify_token(token)
-        print("Verified username:", username)  # Debug print
-
-        user = crud.get_user_by_username(db, username)
-        print("User from DB:", user)  # Debug print
-
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-    except HTTPException as e:
-        print("Token verification or user fetch failed:", e.detail)  # Debug print:
+        print("Missing token")
+        await websocket.accept()
+        await websocket.send_text("ERROR: Token is missing.")
         await websocket.close(code=1008)
         return
 
+    try:
+        username = await verify_token(token)
+        print("Verified username:", username)
 
-    # Fetch recent messages from the chat room
-    recent_messages = (
-        db.query(models.Message)
-        .filter(models.Message.room_id == room_id)
-        .order_by(models.Message.timestamp.desc())
-        .limit(10)
-        .all()
+        user = crud.get_user_by_username(db, username)
+        print("User from DB:", user)
+
+        if not user:
+            print("User not found")
+            await websocket.accept()
+            await websocket.send_text("ERROR: User not found.")
+            await websocket.close(code=1008)
+            return
+
+    except Exception as e:
+        print("Token verification or user fetch error:", e)
+        await websocket.accept()
+        await websocket.send_text(f"ERROR: {str(e)}")
+        await websocket.close(code=1008)
+        return
+
+    room = db.query(models.Room).filter(models.Room.id == room_id).first()
+    if not room:
+        print("Room not found")
+        await websocket.accept()
+        await websocket.send_text("ERROR: Room not found.")
+        await websocket.close(code=1008)
+        return
+
+    is_member = (
+        db.query(models.RoomMember)
+        .filter_by(room_id=room_id, user_id=user.id)
+        .first()
     )
+    if not is_member:
+        print(f"User {user.username} not a member of room {room_id}")
+        await websocket.accept()
+        await websocket.send_text("ERROR: You are not a member of this room.")
+        await websocket.close(code=1008)
+        return
 
-    # accept websocket connection
+    print("Accepting websocket connection")
     await websocket.accept()
 
-    for msg in reversed(recent_messages):  # send oldest to newest
-        await websocket.send_text(json.dumps({
-            "id": msg.id,
-            "content": msg.content,
-            "timestamp": msg.timestamp.isoformat(),
-            "sender": db.query(models.User).get(msg.sender_id).username,
-            "room_id": msg.room_id
-        }))
-
-    if room_id not in connected_clients:
-        connected_clients[room_id] = []
-    connected_clients[room_id].add(websocket)
-
     try:
+        recent_messages = (
+            db.query(models.Message)
+            .filter(models.Message.room_id == room_id)
+            .order_by(models.Message.timestamp.desc())
+            .limit(10)
+            .all()
+        )
+
+        for msg in reversed(recent_messages):
+            sender = db.query(models.User).filter(models.User.id == msg.sender_id).first()
+            sender_name = sender.username if sender else "Unknown"
+            await websocket.send_text(json.dumps({
+                "id": msg.id,
+                "content": msg.content,
+                "timestamp": msg.timestamp.isoformat(),
+                "sender": sender_name,
+                "room_id": msg.room_id
+            }))
+
+        if room_id not in connected_clients:
+            connected_clients[room_id] = set()
+        connected_clients[room_id].add(websocket)
+
+        print(f"User {user.username} connected to room {room_id}")
+
         while True:
             data = await websocket.receive_text()
-            await websocket.send_text(f"Received: {data}")
-            
-            try:
-                # Parse JSON message
-                message_data = json.loads(data)
-                content = message_data.get("content")
-                
-                # Save message to DB
-                new_message = models.Message(
-                    content=content,
-                    timestamp=datetime.utcnow(),
-                    sender_id=user.id,
-                    room_id=room_id
-                )
-                db.add(new_message)
-                db.commit()
-                db.refresh(new_message)
+            print(f"Received data from {user.username}: {data}")
+            message_data = json.loads(data)
+            content = message_data.get("content")
 
-                # Format message to send
-                formatted_msg = {
-                    "id": new_message.id,
-                    "content": new_message.content,
-                    "timestamp": new_message.timestamp.isoformat(),
-                    "sender": user.username,
-                    "room_id": new_message.room_id
-                }
+            new_message = models.Message(
+                content=content,
+                timestamp=datetime.utcnow(),
+                sender_id=user.id,
+                room_id=room_id
+            )
+            db.add(new_message)
+            db.commit()
+            db.refresh(new_message)
 
-                # Broadcast to all clients in the room
-                for client in connected_clients[room_id]:
-                    await client.send_text(json.dumps(formatted_msg))
+            formatted_msg = {
+                "id": new_message.id,
+                "content": new_message.content,
+                "timestamp": new_message.timestamp.isoformat(),
+                "sender": user.username,
+                "room_id": new_message.room_id
+            }
 
-            except Exception as e:
-                await websocket.send_text(json.dumps({"error": str(e)}))
+            for client in connected_clients[room_id]:
+                await client.send_text(json.dumps(formatted_msg))
 
     except WebSocketDisconnect:
+        print(f"User {user.username} disconnected from room {room_id}")
         connected_clients[room_id].remove(websocket)
         if not connected_clients[room_id]:
             del connected_clients[room_id]
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        await websocket.close(code=1011)
+
 
 
 # get the lists of the rooms avalilable
 @app.get("/rooms")
 def get_rooms(db: Session = Depends(get_db)):
     return db.query(models.Room).all()
+
+
+# add user to the room
+# @app.post("/rooms/{room_id}/join")
+# def join_room(room_id: int, current_user=Depends(get_current_user), db: Session=Depends(get_db)):
+#     membership = crud.add_user_to_room(db, current_user.id, room_id)
+#     if membership:
+#         return {"message": f"User '{current_user.username}' joined room {room_id}"}
+#     else:
+#         raise HTTPException(status_code=400, detail="Could not join the room")

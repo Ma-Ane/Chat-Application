@@ -16,3 +16,40 @@ def create_user(db:Session, username:str, password:str, role:str = 'user'):
     db.refresh(user)
     return user
 
+
+def add_user_to_room(db: Session, user_id: int, room_id: int):
+    # Check if user is already a member of the room
+    existing = (
+        db.query(models.RoomMember)
+        .filter(models.RoomMember.user_id == user_id, models.RoomMember.room_id == room_id)
+        .first()
+    )
+    if existing:
+        return existing
+
+    membership = models.RoomMember(user_id=user_id, room_id=room_id)
+    db.add(membership)
+    db.commit()
+    db.refresh(membership)
+    return membership
+
+def remove_user_from_room(db: Session, user_id: int, room_id: int):
+    membership = (
+        db.query(models.RoomMember)
+        .filter(models.RoomMember.user_id == user_id, models.RoomMember.room_id == room_id)
+        .first()
+    )
+    if membership:
+        db.delete(membership)
+        db.commit()
+        return True
+    return False
+
+def get_rooms_for_user(db: Session, user_id: int):
+    return (
+        db.query(models.Room)
+        .join(models.RoomMember, models.Room.id == models.RoomMember.room_id)
+        .filter(models.RoomMember.user_id == user_id)
+        .all()
+    )
+
